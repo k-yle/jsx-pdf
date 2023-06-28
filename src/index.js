@@ -1,3 +1,5 @@
+/* eslint-disable no-use-before-define, no-restricted-syntax, no-await-in-loop */
+
 /*
  * Copyright 2018 Schibsted.
  * Licensed under the MIT license. See LICENSE file in the project root for details.
@@ -53,9 +55,7 @@ function unwrapTextElements(elements) {
   return elements;
 }
 
-function resolveChildren(tag, parentContext, isTopLevel) {
-  const resolvedTag = resolve(tag, parentContext);
-
+function validateTag(resolvedTag, isTopLevel) {
   if (!resolvedTag) {
     return null;
   }
@@ -64,7 +64,7 @@ function resolveChildren(tag, parentContext, isTopLevel) {
     return resolvedTag;
   }
 
-  const { elementName, children = [], attributes } = resolvedTag;
+  const { elementName } = resolvedTag;
 
   if (!isTopLevel && isTopLevelElement(elementName)) {
     throw new Error(
@@ -78,6 +78,67 @@ function resolveChildren(tag, parentContext, isTopLevel) {
     );
   }
 
+  // eslint-disable-next-line unicorn/no-useless-undefined -- rule conflicts with `consistent-return`
+  return undefined;
+}
+
+function appendChildToChildren(resolvedChild, resolvedChildren) {
+  if (isTextElement(last(resolvedChildren)) && isTextElement(resolvedChild)) {
+    // If the previous child is a string
+    // and the next child is a string,
+    // join them together.
+    // eslint-disable-next-line no-param-reassign -- deliberate, this is much more performant
+    resolvedChildren[resolvedChildren.length - 1] = `${
+      resolvedChildren[resolvedChildren.length - 1]
+    }${resolvedChild}`;
+  } else if (!isNil(resolvedChild)) {
+    // Otherwise push the child onto
+    // the accumulator (as long as it's
+    // not null or undefined).
+    resolvedChildren.push(resolvedChild);
+  }
+}
+
+/**
+ * a variant of {@link resolveChildren} which does not support async components
+ */
+function resolveChildrenSync(tag, parentContext, isTopLevel) {
+  const resolvedTag = resolve(tag, parentContext);
+
+  if (resolvedTag instanceof Promise) {
+    throw new TypeError(
+      'Async components are not permitted in a synchronous context',
+    );
+  }
+
+  const result = validateTag(resolvedTag, isTopLevel);
+  if (result !== undefined) return result;
+
+  const { children = [] } = resolvedTag;
+
+  const resolvedChildren = [];
+
+  for (const child of children) {
+    const resolvedChild = resolveChildrenSync(
+      child,
+      createContext(parentContext),
+      false,
+    );
+
+    appendChildToChildren(resolvedChild, resolvedChildren);
+  }
+
+  return resolveIntrinsicChildren(resolvedTag, resolvedChildren);
+}
+
+async function resolveChildren(tag, parentContext, isTopLevel) {
+  const resolvedTag = await resolve(tag, parentContext);
+
+  const result = validateTag(resolvedTag, isTopLevel);
+  if (result !== undefined) return result;
+
+  const { elementName, children = [], attributes } = resolvedTag;
+
   if (
     ['header', 'footer'].includes(elementName) &&
     children.length === 1 &&
@@ -85,31 +146,29 @@ function resolveChildren(tag, parentContext, isTopLevel) {
   ) {
     return (...args) => ({
       stack: [
-        resolveChildren(children[0](...args), createContext(parentContext)),
+        resolveChildrenSync(children[0](...args), createContext(parentContext)),
       ],
       ...attributes,
     });
   }
 
-  const resolvedChildren = children.reduce((accumulator, child) => {
-    const resolvedChild = resolveChildren(child, createContext(parentContext));
+  const resolvedChildren = [];
 
-    if (isTextElement(last(accumulator)) && isTextElement(resolvedChild)) {
-      // If the previous child is a string
-      // and the next child is a string,
-      // join them together.
-      accumulator[accumulator.length - 1] = `${
-        accumulator[accumulator.length - 1]
-      }${resolvedChild}`;
-    } else if (!isNil(resolvedChild)) {
-      // Otherwise push the child onto
-      // the accumulator (as long as it's
-      // not null or undefined).
-      accumulator.push(resolvedChild);
-    }
+  for (const child of children) {
+    const resolvedChild = await resolveChildren(
+      await child,
+      createContext(parentContext),
+      false,
+    );
 
-    return accumulator;
-  }, []);
+    appendChildToChildren(resolvedChild, resolvedChildren);
+  }
+
+  return resolveIntrinsicChildren(resolvedTag, resolvedChildren);
+}
+
+function resolveIntrinsicChildren(resolvedTag, resolvedChildren) {
+  const { elementName, attributes } = resolvedTag;
 
   /**
    * This is the meat. If you're in this file, you're probably looking for this.
@@ -162,9 +221,9 @@ function resolveChildren(tag, parentContext, isTopLevel) {
  * Recursively traverse the JSON component tree created by the createElement calls,
  * resolving components from the bottom up.
  */
-function renderPdf(tag) {
+async function renderPdf(tag) {
   const context = createContext();
-  const resolvedTag = resolve(tag, context);
+  const resolvedTag = await resolve(tag, context);
   const { children, elementName, attributes } = resolvedTag;
 
   if (elementName !== 'document') {
@@ -176,14 +235,14 @@ function renderPdf(tag) {
   const result = {};
   const isTopLevel = true;
 
-  children.forEach((child) => {
-    const resolvedChild = resolve(child, context);
-    result[resolvedChild.elementName] = resolveChildren(
+  for (const child of children) {
+    const resolvedChild = await resolve(await child, context);
+    result[resolvedChild.elementName] = await resolveChildren(
       resolvedChild,
       context,
       isTopLevel,
     );
-  });
+  }
 
   return {
     ...result,

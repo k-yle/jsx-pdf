@@ -1,3 +1,4 @@
+// @ts-check
 /*
  * Copyright 2018 Schibsted.
  * Licensed under the MIT license. See LICENSE file in the project root for details.
@@ -8,9 +9,9 @@ import JsxPdf from '.';
 jest.mock('pdfmake', () => jest.fn());
 
 describe('#jsx-pdf', () => {
-  it('should add custom style to pdfmake document', () => {
+  it('should add custom style to pdfmake document', async () => {
     expect(
-      JsxPdf.renderPdf(
+      await JsxPdf.renderPdf(
         <document
           defaultStyle={{
             font: 'FontCustom',
@@ -28,9 +29,9 @@ describe('#jsx-pdf', () => {
     );
   });
 
-  it('should return the pdfmake document definition for simple components', () => {
+  it('should return the pdfmake document definition for simple components', async () => {
     expect(
-      JsxPdf.renderPdf(
+      await JsxPdf.renderPdf(
         <document>
           <content>hello</content>
         </document>,
@@ -42,9 +43,9 @@ describe('#jsx-pdf', () => {
     });
   });
 
-  it('should return the pdfmake document definition for complex trees of components', () => {
+  it('should return the pdfmake document definition for complex trees of components', async () => {
     expect(
-      JsxPdf.renderPdf(
+      await JsxPdf.renderPdf(
         <document>
           <content>
             <text>first</text>
@@ -59,9 +60,9 @@ describe('#jsx-pdf', () => {
     });
   });
 
-  it('should support numbers inside jsx', () => {
+  it('should support numbers inside jsx', async () => {
     expect(
-      JsxPdf.renderPdf(
+      await JsxPdf.renderPdf(
         <document>
           <content>{123}</content>
         </document>,
@@ -73,9 +74,9 @@ describe('#jsx-pdf', () => {
     });
   });
 
-  it('should concatenate consecutive numbers rather than adding them', () => {
+  it('should concatenate consecutive numbers rather than adding them', async () => {
     expect(
-      JsxPdf.renderPdf(
+      await JsxPdf.renderPdf(
         <document>
           <content>
             {123}
@@ -91,11 +92,11 @@ describe('#jsx-pdf', () => {
   });
 
   describe('component functions', () => {
-    it('should traverse composite components', () => {
+    it('should traverse composite components', async () => {
       const Component = () => <text>hello</text>;
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <Component />
@@ -109,7 +110,7 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should traverse nested composite components', () => {
+    it('should traverse nested composite components', async () => {
       const ChildComponent = () => <text>hello</text>;
       const Component = () => (
         <stack>
@@ -118,7 +119,7 @@ describe('#jsx-pdf', () => {
       );
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <Component />
@@ -136,11 +137,11 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should support object', () => {
+    it('should support object', async () => {
       const fragment = <text>test</text>;
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>{fragment}</content>
           </document>,
@@ -152,11 +153,11 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should join resulting text elements together', () => {
+    it('should join resulting text elements together', async () => {
       const Name = () => 'Mr. Test';
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <text>
@@ -172,9 +173,9 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should support nested text elements in the stack', () => {
+    it('should support nested text elements in the stack', async () => {
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <text>
@@ -192,9 +193,161 @@ describe('#jsx-pdf', () => {
     });
   });
 
-  it('should ignore falsy values', () => {
+  describe('async components', () => {
+    it('should traverse nested composite async components', async () => {
+      const ChildComponent = async () => {
+        const string = await new Promise((resolve) => resolve('abc123'));
+        return <text>{string}</text>;
+      };
+      const Component = () => (
+        <stack>
+          <ChildComponent />
+        </stack>
+      );
+
+      expect(
+        await JsxPdf.renderPdf(
+          <document>
+            <content>
+              <Component />
+            </content>
+          </document>,
+        ),
+      ).toStrictEqual({
+        content: {
+          stack: [
+            {
+              stack: [{ text: 'abc123' }],
+            },
+          ],
+        },
+      });
+    });
+
+    it('should ignore falsy values returned from async components', async () => {
+      const AsyncNull = async () => null;
+      const AsyncUndefined = async () => {};
+      const AsyncString = async () => '';
+      const AsyncZero = async () => 0;
+      const AsyncNaN = async () => Number.NaN;
+      const AsyncFalse = async () => false;
+      const AsyncFragment = async () => <></>;
+      expect(
+        await JsxPdf.renderPdf(
+          <document>
+            <content>
+              Hello
+              <AsyncNull />
+              <AsyncUndefined />
+              <AsyncString />
+              <AsyncZero />
+              <AsyncNaN />
+              <AsyncFalse />!
+              <AsyncFragment />
+            </content>
+          </document>,
+        ),
+      ).toEqual({
+        content: {
+          stack: ['Hello!'],
+        },
+      });
+    });
+
+    it('should allow render props in async components', async () => {
+      expect.assertions(5);
+
+      const CURRENT = 1;
+      const TOTAL = 2;
+      const PAGE_SIZE = { width: 1080 };
+
+      const AsyncComponent = async () => (
+        <header>
+          {(currentPage, pageCount, pageSize) => {
+            expect(currentPage).toBe(CURRENT);
+            expect(pageCount).toBe(TOTAL);
+            expect(pageSize).toBe(PAGE_SIZE);
+
+            return (
+              <columns>
+                <column width="*">I am the head</column>
+                <column width="*">
+                  Page {currentPage} of {pageCount}
+                </column>
+                <column width="*">Hi</column>
+              </columns>
+            );
+          }}
+        </header>
+      );
+
+      const result = await JsxPdf.renderPdf(
+        <document>
+          <AsyncComponent />
+        </document>,
+      );
+
+      expect(result).toEqual({
+        header: expect.any(Function),
+      });
+
+      expect(result.header(CURRENT, TOTAL, PAGE_SIZE)).toEqual({
+        stack: [
+          {
+            columns: [
+              { stack: ['I am the head'], width: '*' },
+              { stack: ['Page 1 of 2'], width: '*' },
+              { stack: ['Hi'], width: '*' },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('errors if you try to use async components within a render prop', async () => {
+      expect.assertions(5);
+
+      const CURRENT = 1;
+      const TOTAL = 2;
+      const PAGE_SIZE = { width: 1080 };
+
+      const AnotherAsyncComponent = async () => <text>hello</text>;
+
+      const AsyncComponent = async () => (
+        <header>
+          {(currentPage, pageCount, pageSize) => {
+            expect(currentPage).toBe(CURRENT);
+            expect(pageCount).toBe(TOTAL);
+            expect(pageSize).toBe(PAGE_SIZE);
+
+            return <AnotherAsyncComponent />;
+          }}
+        </header>
+      );
+
+      const result = await JsxPdf.renderPdf(
+        <document>
+          <AsyncComponent />
+        </document>,
+      );
+
+      expect(result).toEqual({
+        header: expect.any(Function),
+      });
+
+      expect(() => {
+        result.header(CURRENT, TOTAL, PAGE_SIZE);
+      }).toThrow(
+        new Error(
+          'Async components are not permitted in a synchronous context',
+        ),
+      );
+    });
+  });
+
+  it('should ignore falsy values', async () => {
     expect(
-      JsxPdf.renderPdf(
+      await JsxPdf.renderPdf(
         <document>
           <content>
             Hello{null}
@@ -213,7 +366,7 @@ describe('#jsx-pdf', () => {
     });
   });
 
-  it('should ignore wrapped falsy values', () => {
+  it('should ignore wrapped falsy values', async () => {
     const Null = () => null;
     const Undefined = () => {};
     const Empty = () => '';
@@ -222,7 +375,7 @@ describe('#jsx-pdf', () => {
     const False = () => () => false;
 
     expect(
-      JsxPdf.renderPdf(
+      await JsxPdf.renderPdf(
         <document>
           <content>
             <text>
@@ -245,11 +398,11 @@ describe('#jsx-pdf', () => {
   });
 
   describe('higher order components', () => {
-    it('should allow higher order components', () => {
+    it('should allow higher order components', async () => {
       const Component = (attributes) => <text>{attributes.children}</text>;
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <Component>hello</Component>
@@ -265,7 +418,7 @@ describe('#jsx-pdf', () => {
   });
 
   describe('context', () => {
-    it('should pass context to children', () => {
+    it('should pass context to children', async () => {
       const Provider = (attributes, context, updateContext) => {
         updateContext({ mytest: 'test' });
         return attributes.children[0];
@@ -276,7 +429,7 @@ describe('#jsx-pdf', () => {
       );
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <Provider>
             <document>
               <content>
@@ -292,7 +445,7 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should not pass context to siblings', () => {
+    it('should not pass context to siblings', async () => {
       const Provider = (attributes, context, updateContext) => {
         updateContext({ mytest: 'this should not exist in the sibling' });
         return <text>first</text>;
@@ -303,7 +456,7 @@ describe('#jsx-pdf', () => {
       );
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <Provider />
@@ -318,7 +471,7 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should pass context to grandchildren', () => {
+    it('should pass context to grandchildren', async () => {
       const Provider = (attributes, context, updateContext) => {
         updateContext({ mytest: 'test' });
         return attributes.children[0];
@@ -330,7 +483,7 @@ describe('#jsx-pdf', () => {
       const MyParentComponent = () => <MyContextualisedComponent />;
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <Provider>
             <document>
               <content>
@@ -348,20 +501,20 @@ describe('#jsx-pdf', () => {
   });
 
   describe('document', () => {
-    it('should set page size', () => {
-      expect(JsxPdf.renderPdf(<document pageSize={5} />)).toEqual({
+    it('should set page size', async () => {
+      expect(await JsxPdf.renderPdf(<document pageSize={5} />)).toEqual({
         pageSize: 5,
       });
     });
 
-    it('should allow header render prop', () => {
+    it('should allow header render prop', async () => {
       expect.assertions(5);
 
       const CURRENT = 1;
       const TOTAL = 2;
       const PAGE_SIZE = { width: 1080 };
 
-      const result = JsxPdf.renderPdf(
+      const result = await JsxPdf.renderPdf(
         <document>
           <header>
             {(currentPage, pageCount, pageSize) => {
@@ -400,13 +553,13 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should allow footer render prop', () => {
+    it('should allow footer render prop', async () => {
       expect.assertions(4);
 
       const CURRENT = 1;
       const TOTAL = 2;
 
-      const result = JsxPdf.renderPdf(
+      const result = await JsxPdf.renderPdf(
         <document>
           <footer>
             {(currentPage, pageCount) => {
@@ -442,10 +595,10 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should allow simple header & footer', () => {
+    it('should allow simple header & footer', async () => {
       expect.assertions(1);
 
-      const result = JsxPdf.renderPdf(
+      const result = await JsxPdf.renderPdf(
         <document>
           <header>
             <text>I am the head</text>
@@ -464,16 +617,16 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should set page margins', () => {
-      expect(JsxPdf.renderPdf(<document pageMargins={10} />)).toEqual({
+    it('should set page margins', async () => {
+      expect(await JsxPdf.renderPdf(<document pageMargins={10} />)).toEqual({
         pageMargins: 10,
       });
     });
 
     ['title', 'author', 'subject', 'keywords'].forEach((field) => {
-      it(`should set ${field} in info`, () => {
+      it(`should set ${field} in info`, async () => {
         expect(
-          JsxPdf.renderPdf(<document info={{ [field]: 'foo' }} />),
+          await JsxPdf.renderPdf(<document info={{ [field]: 'foo' }} />),
         ).toEqual({
           info: {
             [field]: 'foo',
@@ -482,9 +635,9 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should error if a top-level element appears below the top level', () => {
-      expect(() => {
-        JsxPdf.renderPdf(
+    it('should error if a top-level element appears below the top level', async () => {
+      await expect(async () => {
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <stack>
@@ -493,12 +646,12 @@ describe('#jsx-pdf', () => {
             </content>
           </document>,
         );
-      }).toThrow(/immediate descendents/);
+      }).rejects.toThrow(/immediate descendents/);
     });
 
-    it('should error if a non-top-level element appears at the top level', () => {
-      expect(() => {
-        JsxPdf.renderPdf(
+    it('should error if a non-top-level element appears at the top level', async () => {
+      await expect(async () => {
+        await JsxPdf.renderPdf(
           <document>
             <text>oops!</text>
             <content>
@@ -506,38 +659,38 @@ describe('#jsx-pdf', () => {
             </content>
           </document>,
         );
-      }).toThrow(
+      }).rejects.toThrow(
         /the <document> element can only contain <header>, <content>, and <footer> elements/i,
       );
     });
 
-    it('should error if document is not the root element', () => {
-      expect(() => {
-        JsxPdf.renderPdf(
+    it('should error if document is not the root element', async () => {
+      await expect(async () => {
+        await JsxPdf.renderPdf(
           <stack>
             <text>foobar</text>
           </stack>,
         );
-      }).toThrow(/root/);
+      }).rejects.toThrow(/root/);
     });
 
-    it('should error if a document appears below the top level', () => {
-      expect(() => {
-        JsxPdf.renderPdf(
+    it('should error if a document appears below the top level', async () => {
+      await expect(async () => {
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <document />
             </content>
           </document>,
         );
-      }).toThrow(/root/);
+      }).rejects.toThrow(/root/);
     });
 
-    it('should not error if a top level element appears nested inside a function component', () => {
+    it('should not error if a top level element appears nested inside a function component', async () => {
       const Nested = () => <content />;
 
-      expect(() => {
-        JsxPdf.renderPdf(
+      await expect(async () => {
+        await JsxPdf.renderPdf(
           <document>
             <Nested />
           </document>,
@@ -545,7 +698,7 @@ describe('#jsx-pdf', () => {
       }).not.toThrow();
     });
 
-    it('should resolve functional top level elements', () => {
+    it('should resolve functional top level elements', async () => {
       const Component = () => (
         <content>
           <text>test</text>
@@ -553,7 +706,7 @@ describe('#jsx-pdf', () => {
       );
 
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <Component />
           </document>,
@@ -567,9 +720,9 @@ describe('#jsx-pdf', () => {
   });
 
   describe('Fragment', () => {
-    it('should convert Fragments into a stack', () => {
+    it('should convert Fragments into a stack', async () => {
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <>
@@ -590,7 +743,7 @@ describe('#jsx-pdf', () => {
       });
     });
 
-    it('should convert Fragments into a stack when a Component returns a Fragment', () => {
+    it('should convert Fragments into a stack when a Component returns a Fragment', async () => {
       const Component = () => (
         <>
           <text>Hello</text>
@@ -598,7 +751,7 @@ describe('#jsx-pdf', () => {
         </>
       );
       expect(
-        JsxPdf.renderPdf(
+        await JsxPdf.renderPdf(
           <document>
             <content>
               <Component />
@@ -619,9 +772,9 @@ describe('#jsx-pdf', () => {
 
   describe('primitives', () => {
     describe('header', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <header>
                 <text>test header</text>
@@ -635,9 +788,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <header fontSize={18} bold>
                 <text>test header</text>
@@ -655,9 +808,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('content', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <text>test content</text>
@@ -671,9 +824,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content fontSize={18} bold>
                 <text>test content</text>
@@ -691,9 +844,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('footer', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <footer>
                 <text>test footer</text>
@@ -707,9 +860,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <footer fontSize={18} bold>
                 <text>test footer</text>
@@ -727,9 +880,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('text', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <text>test text</text>
@@ -747,9 +900,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <text color="blue" bold>
@@ -773,9 +926,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('image', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <image src="/users/bob/photo.png" />
@@ -793,9 +946,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <image src="/users/bob/photo.png" margin={[0, 40, 10, 30]} />
@@ -816,9 +969,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('svg', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <svg
@@ -846,9 +999,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <svg
@@ -880,9 +1033,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('qr', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <qr content="my text" />
@@ -900,9 +1053,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <qr content="my text" foreground="#f9c7bf" />
@@ -923,9 +1076,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('stack', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <stack>
@@ -946,9 +1099,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <stack fontSize={24} color="red">
@@ -973,9 +1126,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('columns', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <columns>
@@ -995,9 +1148,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <columns fontSize={14} margin={[10, 20, 20, 0]}>
@@ -1020,9 +1173,9 @@ describe('#jsx-pdf', () => {
       });
 
       describe('column', () => {
-        it('should be converted', () => {
+        it('should be converted', async () => {
           expect(
-            JsxPdf.renderPdf(
+            await JsxPdf.renderPdf(
               <document>
                 <content>
                   <column>
@@ -1042,9 +1195,9 @@ describe('#jsx-pdf', () => {
           });
         });
 
-        it('should set passed attributes', () => {
+        it('should set passed attributes', async () => {
           expect(
-            JsxPdf.renderPdf(
+            await JsxPdf.renderPdf(
               <document>
                 <content>
                   <column fontSize={24}>
@@ -1068,9 +1221,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('table', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <table>
@@ -1092,9 +1245,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set "headerRows" and "widths" attributes on table', () => {
+      it('should set "headerRows" and "widths" attributes on table', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <table headerRows={1} widths={['auto']}>
@@ -1118,9 +1271,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should omit "headerRows" and "widths" on wrapper', () => {
+      it('should omit "headerRows" and "widths" on wrapper', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <table
@@ -1150,9 +1303,9 @@ describe('#jsx-pdf', () => {
       });
 
       describe('row', () => {
-        it('should be converted', () => {
+        it('should be converted', async () => {
           expect(
-            JsxPdf.renderPdf(
+            await JsxPdf.renderPdf(
               <document>
                 <content>
                   <row>
@@ -1170,9 +1323,9 @@ describe('#jsx-pdf', () => {
       });
 
       describe('cell', () => {
-        it('should be converted', () => {
+        it('should be converted', async () => {
           expect(
-            JsxPdf.renderPdf(
+            await JsxPdf.renderPdf(
               <document>
                 <content>
                   <cell>
@@ -1192,9 +1345,9 @@ describe('#jsx-pdf', () => {
           });
         });
 
-        it('should set passed attributes', () => {
+        it('should set passed attributes', async () => {
           expect(
-            JsxPdf.renderPdf(
+            await JsxPdf.renderPdf(
               <document>
                 <content>
                   <cell fontSize={24}>
@@ -1218,9 +1371,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('unordered list', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <ul>
@@ -1241,9 +1394,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <ul
@@ -1279,9 +1432,9 @@ describe('#jsx-pdf', () => {
     });
 
     describe('ordered list', () => {
-      it('should be converted', () => {
+      it('should be converted', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <ol>
@@ -1302,9 +1455,9 @@ describe('#jsx-pdf', () => {
         });
       });
 
-      it('should set passed attributes', () => {
+      it('should set passed attributes', async () => {
         expect(
-          JsxPdf.renderPdf(
+          await JsxPdf.renderPdf(
             <document>
               <content>
                 <ol
